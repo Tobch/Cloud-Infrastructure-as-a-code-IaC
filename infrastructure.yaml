@@ -1,0 +1,353 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: High Availability Cloud Infrastructure as Code (IaC) - Project 3
+
+Parameters:
+  EnvironmentName:
+    Type: String
+  VpcNetCIDR:
+    Type: String
+  PubSubnet01CIDR:
+    Type: String
+  PubSubnet02CIDR:
+    Type: String
+  PrivSubnet01CIDR:
+    Type: String
+  PrivSubnet02CIDR:
+    Type: String
+
+Resources:
+  # 1. Virtual Private Cloud (VPC)
+  MainVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcNetCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: "Name"
+          Value: !Ref EnvironmentName
+
+  # 2. Public Subnet 1 (Availability Zone A)
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MainVPC
+      AvailabilityZone: !Select [0, !GetAZs ''] 
+      CidrBlock: !Ref PubSubnet01CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${EnvironmentName}-PublicSubnet1'
+
+  # 3. Remaining Subnets
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MainVPC
+      AvailabilityZone: !Select [1, !GetAZs ''] 
+      CidrBlock: !Ref PubSubnet02CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${EnvironmentName}-PublicSubnet2'
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MainVPC
+      AvailabilityZone: !Select [0, !GetAZs ''] 
+      CidrBlock: !Ref PrivSubnet01CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${EnvironmentName}-PrivateSubnet1'
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MainVPC
+      AvailabilityZone: !Select [1, !GetAZs ''] 
+      CidrBlock: !Ref PrivSubnet02CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${EnvironmentName}-PrivateSubnet2'
+
+  # 4. Internet Gateway
+  IGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: "Name"
+          Value: "InternetGW"
+
+  IGWAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MainVPC
+      InternetGatewayId: !Ref IGW
+
+  # 5. Elastic IPs and NAT Gateways
+  NatGwEIP01:
+    Type: AWS::EC2::EIP
+    DependsOn: IGWAttach
+    Properties:
+      Tags:
+        - Key: "Name"
+          Value: "NatGwEIP01"
+
+  NatGw01:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGwEIP01.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: "Name"
+          Value: "NatGw01"
+
+  NatGwEIP02:
+    Type: AWS::EC2::EIP
+    DependsOn: IGWAttach
+    Properties:
+      Tags:
+        - Key: "Name"
+          Value: "NatGwEIP02"
+
+  NatGw02:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGwEIP02.AllocationId
+      SubnetId: !Ref PublicSubnet2
+      Tags:
+        - Key: "Name"
+          Value: "NatGw02"
+
+  # 6. Route Tables and Associations
+  PubRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MainVPC
+      Tags:
+        - Key: "Name"
+          Value: "PubRouteTable"
+
+  PubRoute:
+    Type: AWS::EC2::Route
+    DependsOn: IGWAttach
+    Properties:
+      RouteTableId: !Ref PubRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGW
+
+  PubSubnet1Assoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PubRouteTable
+
+  PubSubnet2Assoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PubRouteTable
+
+  PrivRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MainVPC
+      Tags:
+        - Key: "Name"
+          Value: "PrivRouteTable1"
+
+  PrivRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGw01
+
+  PrivSubnet1Assoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivRouteTable1
+
+  PrivRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MainVPC
+      Tags:
+        - Key: "Name"
+          Value: "PrivRouteTable2"
+
+  PrivRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGw02
+
+  PrivSubnet2Assoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivRouteTable2
+  
+  # 7. Security Groups
+  LBSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP to Load Balancer
+      VpcId: !Ref MainVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  ServerSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP from LB
+      VpcId: !Ref MainVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !GetAtt LBSecGroup.GroupId
+
+  # 8. Load Balancer and Target Group
+  LB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref LBSecGroup
+
+  LBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 5
+      VpcId: !Ref MainVPC
+
+  LBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref LBTargetGroup
+      LoadBalancerArn: !Ref LB
+      Port: 80
+      Protocol: HTTP
+
+  LBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref LBTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values: [/]
+      ListenerArn: !Ref LBListener
+      Priority: 1
+
+  # 9. Launch Template (Replaces deprecated LaunchConfiguration)
+  HAProjectLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId: ami-06616b7884ac98cdd
+        InstanceType: t2.micro
+        NetworkInterfaces:
+          - AssociatePublicIpAddress: false
+            DeviceIndex: '0'
+            Groups:
+              - !GetAtt ServerSecGroup.GroupId
+        BlockDeviceMappings:
+          - DeviceName: /dev/sdm
+            Ebs:
+              VolumeSize: '8'
+        UserData:
+          Fn::Base64: |
+            #!/bin/bash
+            yum update -y
+            yum install -y httpd
+            yum install -y git
+            yum install -y php
+            yum install -y php-mysqli
+            amazon-linux-extras install php7.4
+            systemctl start httpd
+            systemctl enable httpd
+            cd /var/www/html
+
+  # 10. Auto-Scaling Group utilizing the Launch Template
+  ServersAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref HAProjectLaunchTemplate
+        Version: !GetAtt HAProjectLaunchTemplate.LatestVersionNumber
+      MinSize: '2'
+      MaxSize: '3'
+      VPCZoneIdentifier:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      TargetGroupARNs:
+        - !Ref LBTargetGroup
+
+  # 11. Database Security Group & Subnet Group
+  DBSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow MySQL access from backend servers
+      VpcId: !Ref MainVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !GetAtt ServerSecGroup.GroupId
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "Database subnet group for private subnets"
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  # 12. Relational Database Service (RDS)
+  database1:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AllocatedStorage: '20'
+      AllowMajorVersionUpgrade: true
+      AutoMinorVersionUpgrade: true
+      BackupRetentionPeriod: 7
+      PubliclyAccessible: false
+      MultiAZ: true 
+      DBInstanceClass: db.t3.micro
+      DBInstanceIdentifier: database-1
+      DBName: myDB
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      Engine: MySQL
+      MasterUsername: admin
+      ManageMasterUserPassword: true # Automatically generates and secures the password in Secrets Manager
+      MaxAllocatedStorage: 22
+      NetworkType: 'IPV4'
+      Port: '3306'
+      StorageEncrypted: true
+      StorageType: 'gp2'
+      VPCSecurityGroups:
+        - !GetAtt DBSecGroup.GroupId
